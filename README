@@ -1,0 +1,6 @@
+example usage:
+
+> list
+"words"
+> map ./processor_map words trigramms
+> reduce ./processor_reduce trigramms statistics

@@ -1,0 +1,8 @@
+CPPLINT.cfg
+mapreduce
+processor_map
+processor_reduce
+.ycm_extra_conf.py*
+*.tbl
+!words.tbl
+temp
