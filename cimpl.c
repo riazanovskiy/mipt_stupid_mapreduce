@@ -5,11 +5,15 @@
 
 #define WORDSIZE 256
 
-char command[WORDSIZE];
 char processor[WORDSIZE];
 
 char tables[100][WORDSIZE];
 char output[WORDSIZE];
+
+enum CLICOMMAND
+{
+    MAP, REDUCE, EXIT, OTHER
+};
 
 int main(int argc, char** argv)
 {
@@ -26,6 +30,9 @@ int main(int argc, char** argv)
     char *line = 0;
     size_t lineLength = 0;
 
+    char command[WORDSIZE] = "";
+    char cmd[1000] = "";
+
     while (printf("1-day-till-deadline> "), getline(&line, &lineLength, stdin) >= 0)
     {
         char *nextToken = strtok(line, " \t\r\n");
@@ -34,9 +41,17 @@ int main(int argc, char** argv)
         else
             continue;
 
-        if (strcmp(command, "map") == 0 || strcmp(command, "reduce") == 0)
+        int currentCommand = OTHER;
+        if (strcmp(command, "map") == 0)
+            currentCommand = MAP;
+        else if (strcmp(command, "reduce"))
+            currentCommand = REDUCE;
+        else if (strcmp(command, "exit"))
+            currentCommand = EXIT;
+
+        if (MAP == currentCommand || REDUCE == currentCommand)
         {
-            if ((nextToken = strtok(NULL, " \t\r\n")))
+            if (nextToken = strtok(NULL, " \t\r\n"))
             {
                 strcpy(processor, nextToken);
             }
@@ -47,7 +62,7 @@ int main(int argc, char** argv)
             }
 
             int nTables = 0;
-            while ((nextToken = strtok(NULL, " \t\r\n")))
+            while (nextToken = strtok(NULL, " \t\r\n"))
             {
                 strcpy(tables[nTables], nextToken);
                 strncat(tables[nTables], ".tbl", WORDSIZE);
@@ -63,38 +78,7 @@ int main(int argc, char** argv)
             --nTables;
             strcpy(output, tables[nTables]);
 
-            char cmd[1000] = "";
-
-            if (strcmp(command, "map") == 0)
-            {
-                for (size_t i = 0; i < nProcesses; i++)
-                {
-                    snprintf(cmd, sizeof(cmd) - 1, "%s > temp_%s_%lu.tbl", processor, command, i);
-                    processorHandles[i] = popen(cmd, "w");
-                }
-
-                int currentTableIdx = 0, currentProcessor = -1;
-                FILE* currentInputTable = fopen(tables[currentTableIdx], "r");
-
-                do
-                {
-                    if (!currentInputTable)
-                    {
-                        fprintf(stderr, "File %s could not be opened, exiting\n", tables[currentTableIdx]);
-                        break;
-                    }
-                    while (!feof(currentInputTable))
-                    {
-                        getline(&line, &lineLength, currentInputTable);
-                        fwrite(line, strlen(line), 1,
-                               processorHandles[currentProcessor = ((currentProcessor + 1) % (int) nProcesses)]);
-                    }
-                    fclose(currentInputTable);
-                }
-                while (currentTableIdx < nTables - 1 &&
-                        (currentInputTable = fopen(tables[++currentTableIdx], "r")));
-            }
-            else if (strcmp(command, "reduce") == 0)
+            if (REDUCE == currentCommand)
             {
                 for (int i = 0; i < nTables; ++i)
                 {
@@ -111,41 +95,44 @@ int main(int argc, char** argv)
                     strncat(cmd, tempName, sizeof(cmd) - 1);
                 }
                 strncat(cmd, " > sorted.tbl", sizeof(cmd) - 1);
-
-                fprintf(stderr, "whole command: %s\n", cmd);
                 system(cmd);
 
-                // now all is sorted and stored in output
-
-                // run reducers
-                for (size_t i = 0; i < nProcesses; i++)
-                {
-                    snprintf(cmd, sizeof(cmd) - 1, "%s > temp_%s_%lu.tbl", processor, command, i);
-                    processorHandles[i] = popen(cmd, "w");
-                }
-
-                int currentProcessor = -1;
-                FILE* reducersInput = fopen("sorted.tbl", "r");
-                assert(reducersInput);
-
-                fprintf(stderr, "sorted.tbl was created and opened\n");
-
-                char lastKey[WORDSIZE] = "Please work";
-                char key[WORDSIZE] = "";
-                while (!feof(reducersInput))
-                {
-                    getline(&line, &lineLength, reducersInput);
-                    sscanf(line, "%s", key);
-
-                    if (strcmp(lastKey, key) != 0)
-                        currentProcessor = ((currentProcessor + 1) % (int)nProcesses);
-                    strcpy(lastKey, key);
-
-                    fwrite(line, strlen(line), 1, processorHandles[currentProcessor]);
-                }
-
-                fclose(reducersInput);
+                strcpy(tables[0], "sorted.tbl");
+                nTables = 1;
             }
+
+            for (size_t i = 0; i < nProcesses; i++)
+            {
+                snprintf(cmd, sizeof(cmd) - 1, "%s > temp_%s_%lu.tbl", processor, command, i);
+                processorHandles[i] = popen(cmd, "w");
+            }
+
+            int currentTableIdx = 0, currentProcessor = 0;
+            FILE* currentInputTable = fopen(tables[currentTableIdx], "r");
+
+            char lastKey[WORDSIZE] = "Please work";
+            char key[WORDSIZE] = "";
+
+            do
+            {
+                if (!currentInputTable)
+                {
+                    fprintf(stderr, "File %s could not be opened, exiting\n", tables[currentTableIdx]);
+                    break;
+                }
+                while (!feof(currentInputTable))
+                {
+                    getline(&line, &lineLength, currentInputTable);
+                    fwrite(line, strlen(line), 1, processorHandles[currentProcessor]);
+
+                    if (currentCommand == MAP || (sscanf(line, "%s", key)
+                                                  && strcmp(lastKey, key)
+                                                  && strcpy(lastKey, key)))
+                        currentProcessor = (currentProcessor + 1) % (int)nProcesses;
+                }
+                fclose(currentInputTable);
+            }
+            while (currentTableIdx < nTables - 1 && (currentInputTable = fopen(tables[++currentTableIdx], "r")));
 
             snprintf(cmd, sizeof(cmd) - 1, "cat temp_%s_{0..%lu}.tbl > %s", command, nProcesses - 1, output);
             system(cmd);
@@ -153,7 +140,7 @@ int main(int argc, char** argv)
             for (size_t i = 0; i < nProcesses; i++)
                 pclose(processorHandles[i]);
         }
-        else if (strcmp(command, "exit") == 0)
+        else if (EXIT == currentCommand)
         {
             break;
         }
@@ -163,6 +150,9 @@ int main(int argc, char** argv)
             continue;
         }
     }
+
+    snprintf(cmd, sizeof(cmd) - 1, "rm -f temp_{map,reduce}_{0..%lu}.tbl", nProcesses - 1);
+    system(cmd);
 
     free(processorHandles);
     free(line);
