@@ -11,10 +11,17 @@ char processor[WORDSIZE];
 char tables[100][WORDSIZE];
 char output[WORDSIZE];
 
-size_t nProcesses = 4;
-
-int main()
+int main(int argc, char** argv)
 {
+    size_t nProcesses = 4;
+
+    if (argc > 1)
+    {
+        int nProcessesArgument = atoi(argv[1]);
+        assert(nProcessesArgument > 0);
+        nProcesses = (size_t) nProcessesArgument;
+    }
+
     FILE** processorHandles = (FILE**) malloc(sizeof(FILE*) * nProcesses);
     char *line = 0;
     size_t lineLength = 0;
@@ -71,7 +78,11 @@ int main()
 
                 do
                 {
-                    assert(currentInputTable);
+                    if (!currentInputTable)
+                    {
+                        fprintf(stderr, "File %s could not be opened, exiting\n", tables[currentTableIdx]);
+                        break;
+                    }
                     while (!feof(currentInputTable))
                     {
                         getline(&line, &lineLength, currentInputTable);
