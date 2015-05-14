@@ -3,10 +3,7 @@
 #include <string.h>
 #include <assert.h>
 
-#define LINESIZE 256
 #define WORDSIZE 256
-
-char line[LINESIZE];
 
 char command[WORDSIZE];
 char processor[WORDSIZE];
@@ -18,7 +15,11 @@ size_t nProcesses = 4;
 
 int main()
 {
-    while (printf("1-day-till-deadline> "), fgets(line, LINESIZE, stdin))
+    FILE** processorHandles = (FILE**) malloc(sizeof(FILE*) * nProcesses);
+    char *line = 0;
+    size_t lineLength = 0;
+
+    while (printf("1-day-till-deadline> "), getline(&line, &lineLength, stdin) >= 0)
     {
         char *nextToken = strtok(line, " \t\r\n");
         if (nextToken)
@@ -59,26 +60,21 @@ int main()
 
             if (strcmp(command, "map") == 0)
             {
-                FILE** processorHandles = (FILE**) malloc(sizeof(FILE*) * nProcesses);
-
                 for (size_t i = 0; i < nProcesses; i++)
                 {
-                    snprintf(cmd, sizeof(cmd) - 1, "%s > temp/temp_%s_%lu.tbl", processor, command, i);
+                    snprintf(cmd, sizeof(cmd) - 1, "%s > temp_%s_%lu.tbl", processor, command, i);
                     processorHandles[i] = popen(cmd, "w");
                 }
 
                 int currentTableIdx = 0, currentProcessor = -1;
                 FILE* currentInputTable = fopen(tables[currentTableIdx], "r");
 
-                char *line = 0;
-                size_t length = 0;
-
                 do
                 {
                     assert(currentInputTable);
                     while (!feof(currentInputTable))
                     {
-                        getline(&line, &length, currentInputTable);
+                        getline(&line, &lineLength, currentInputTable);
                         fwrite(line, strlen(line), 1,
                                processorHandles[currentProcessor = ((currentProcessor + 1) % (int) nProcesses)]);
                     }
@@ -86,61 +82,48 @@ int main()
                 }
                 while (currentTableIdx < nTables - 1 &&
                         (currentInputTable = fopen(tables[++currentTableIdx], "r")));
-
-                for (size_t i = 0; i < nProcesses; i++)
-                    pclose(processorHandles[i]);
-
-                snprintf(cmd, sizeof(cmd) - 1, "cat temp/temp_%s_{0..%lu}.tbl > %s", command, nProcesses - 1, output);
-                system(cmd);
             }
             else if (strcmp(command, "reduce") == 0)
             {
                 for (int i = 0; i < nTables; ++i)
                 {
-                    snprintf(cmd, sizeof(cmd) - 1, "sort --parallel=%lu %s > temp/reduce_%i.tbl",
+                    snprintf(cmd, sizeof(cmd) - 1, "sort --parallel=%lu %s > reduce_%i.tbl",
                              nProcesses, tables[i], i);
                     system(cmd);
                 }
 
-                char tempName[LINESIZE];
+                char tempName[256];
                 snprintf(cmd, sizeof(cmd) - 1, "sort --merge");
                 for (int i = 0; i < nTables; ++i)
                 {
-                    snprintf(tempName, sizeof(tempName) - 1, " temp/reduce_%i.tbl", i);
+                    snprintf(tempName, sizeof(tempName) - 1, " reduce_%i.tbl", i);
                     strncat(cmd, tempName, sizeof(cmd) - 1);
                 }
-                strncat(cmd, " > temp/sorted.tbl", sizeof(cmd) - 1);
+                strncat(cmd, " > sorted.tbl", sizeof(cmd) - 1);
 
                 fprintf(stderr, "whole command: %s\n", cmd);
                 system(cmd);
 
                 // now all is sorted and stored in output
 
-                FILE** processorHandles = (FILE**) malloc(sizeof(FILE*) * nProcesses);
-
                 // run reducers
                 for (size_t i = 0; i < nProcesses; i++)
                 {
-                    snprintf(cmd, sizeof(cmd) - 1, "%s > reduce_answer_%lu.tbl", processor, i);
+                    snprintf(cmd, sizeof(cmd) - 1, "%s > temp_%s_%lu.tbl", processor, command, i);
                     processorHandles[i] = popen(cmd, "w");
                 }
 
                 int currentProcessor = -1;
-                FILE* reducersInput = fopen("temp/sorted.tbl", "r");
+                FILE* reducersInput = fopen("sorted.tbl", "r");
                 assert(reducersInput);
 
-                fprintf(stderr, "temp/sorted.tbl was created and opened\n");
-
-                // all string are sorted and are in output
-
-                char *line = 0;
-                size_t length = 0;
+                fprintf(stderr, "sorted.tbl was created and opened\n");
 
                 char lastKey[WORDSIZE] = "Please work";
                 char key[WORDSIZE] = "";
                 while (!feof(reducersInput))
                 {
-                    getline(&line, &length, reducersInput);
+                    getline(&line, &lineLength, reducersInput);
                     sscanf(line, "%s", key);
 
                     if (strcmp(lastKey, key) != 0)
@@ -150,11 +133,14 @@ int main()
                     fwrite(line, strlen(line), 1, processorHandles[currentProcessor]);
                 }
 
-                for (size_t i = 0; i < nProcesses; i++)
-                    pclose(processorHandles[i]);
-
                 fclose(reducersInput);
             }
+
+            snprintf(cmd, sizeof(cmd) - 1, "cat temp_%s_{0..%lu}.tbl > %s", command, nProcesses - 1, output);
+            system(cmd);
+
+            for (size_t i = 0; i < nProcesses; i++)
+                pclose(processorHandles[i]);
         }
         else if (strcmp(command, "exit") == 0)
         {
@@ -166,6 +152,9 @@ int main()
             continue;
         }
     }
+
+    free(processorHandles);
+    free(line);
 
     return 0;
 }
