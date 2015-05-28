@@ -82,6 +82,7 @@ int parseCommand(const char* command)
 int main(int argc, char** argv)
 {
     system("ls");
+    srand((unsigned int) time(0));
     size_t nProcesses = 4;
 
     if (argc > 1)
@@ -101,6 +102,7 @@ int main(int argc, char** argv)
     char cmd[1000] = "";
 
     pid_t childrenPids[1000] = {};
+    int pidUsed = 0;
 
     while (printf("1-day-till-deadline> "), getline(&line, &lineLength, stdin) >= 0)
     {
@@ -134,6 +136,8 @@ int main(int argc, char** argv)
                 continue;
             }
 
+//            if (0 == strcmp(tables[nTables - 1], "&"))  тут можно сделать additional
+
             --nTables;
             char output[WORDSIZE];
             strcpy(output, tables[nTables]);
@@ -162,27 +166,55 @@ int main(int argc, char** argv)
                 nTables = 1;
             }
 
+            // map ./processor_map words words output
 
+            int outputTableIdx = 0, operationId = rand();
             assert(nTables == 1);
-            int outputTableIdx = 0;
+            int fromPid = pidUsed;
+
             for (int currTable = 0; currTable < nTables; currTable++)
             {
                 for (size_t i = 0; i < nProcesses; i++)
                 {
-                    childrenPids[i] = fork();
+                    childrenPids[pidUsed] = fork();
                     if (0 == childrenPids[i])
                     {
-                        snprintf(cmd, sizeof(cmd) - 1, "%s < marked_%s.tbl_%i > marked_%s.tbl_%i", processor, tables[currTable],
-                                 i, output, outputTableIdx);
+                        snprintf(cmd, sizeof(cmd) - 1,
+                                 "%s < marked_%s.tbl_%zu > temp_%i_%i",
+                                 processor, tables[currTable], i, operationId, outputTableIdx);
                         execlp("bash", "bash", "-c", cmd, (char*)(NULL));
+                        return 0;
                     }
                     outputTableIdx++;
+                    pidUsed++;
                 }
             }
 
-            int status = 0;
+            fprintf(stderr, "my pid %i\n", getpid());
+            if (1)  /// можно сделать additional здесь
+            {
+                int status = 0;
+                for (int i = fromPid; i < fromPid + outputTableIdx; i++)
+                    waitpid(childrenPids[i], &status, 0);
+                if (fromPid + outputTableIdx == pidUsed)
+                    pidUsed = fromPid;
+            }
+
             for (int i = 0; i < nProcesses; i++)
-                waitpid(childrenPids[i], &status, 0);
+            {
+                char cmd[1000] = "cat ";
+                int from = strlen(cmd);
+                for (int j = 0; j < nTables; j++)
+                {
+                    from += snprintf(cmd + from, sizeof(cmd) - 1, "temp_%i_%i ", operationId, i + nProcesses*j);
+                    assert(from < sizeof(cmd));
+                }
+                snprintf(cmd + from, sizeof(cmd) - 1, "> marked_%s.tbl_%i", output, i);
+                system(cmd);
+            }
+
+            snprintf(cmd, sizeof(cmd) - 1, "bash -c \"rm temp_%i_{0..%i}\"", operationId, outputTableIdx - 1);
+            system(cmd);
         }
         else if (EXIT == currentCommand)
         {
