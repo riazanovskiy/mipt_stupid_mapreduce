@@ -21,63 +21,8 @@ enum CLICOMMAND
     MAP, REDUCE, EXIT, MARK, OTHER
 };
 
-
-void splitFile(char* input, size_t nClusters)
-{
-    strncat(input, ".tbl", sizeof(input) - 1);
-
-    FILE* inputFile = fopen(input, "r");
-    fseek(inputFile, 0, SEEK_END);
-    size_t fileLength = (size_t) ftell(inputFile);
-
-    char* fileAddr = (char*) mmap(0, fileLength, PROT_READ, MAP_SHARED,
-                                  fileno(inputFile), 0);
-
-    size_t labels[nClusters + 1];
-    memset(labels, 0, (nClusters + 1) * sizeof(labels[0]));
-
-    size_t currCluster = 0;
-    for (size_t k = 0, i = 0; k < nClusters - 1; k++)
-    {
-        for (size_t j = 0; i < fileLength && j < (fileLength / nClusters + 1); i++, j++)
-        {
-            if (fileAddr[i] == '\n')
-            {
-                labels[currCluster++] = i;
-                i += 2 + fileLength / nClusters - j; // есть ли тут ошибка на один? Да наверняка
-                break;
-            }
-        }
-    }
-
-    labels[currCluster++] = fileLength;
-//    nClusters = currCluster; тут (мб) надо делать меньше блоков, если нужно. сейчас делаются нулевые.
-
-    munmap(fileAddr, fileLength);
-    fclose(inputFile);
-
-    for (int i = 0, prevOffset = -1; i < nClusters; prevOffset = labels[i], i++)
-    {
-        char cmd[1000] = "";
-        snprintf(cmd, sizeof(cmd) - 1, "dd bs=1 if=%s skip=%i count=%zu of=marked_%s_%i",
-                 input, prevOffset + 1, labels[i] - prevOffset, input, i);
-        system(cmd);
-    }
-}
-
-int parseCommand(const char* command)
-{
-    int currentCommand = OTHER;
-    if (strcmp(command, "map") == 0)
-        currentCommand = MAP;
-    else if (strcmp(command, "reduce") == 0)
-        currentCommand = REDUCE;
-    else if (strcmp(command, "exit") == 0)
-        currentCommand = EXIT;
-    else if (strcmp(command, "mark") == 0)
-        currentCommand = MARK;
-    return currentCommand;
-}
+void splitFile(char* input, size_t nClusters);
+int parseCommand(const char* command);
 
 int main(int argc, char** argv)
 {
@@ -166,10 +111,7 @@ int main(int argc, char** argv)
                 nTables = 1;
             }
 
-            // map ./processor_map words words output
-
             int outputTableIdx = 0, operationId = rand();
-            assert(nTables == 1);
             int fromPid = pidUsed;
 
             for (int currTable = 0; currTable < nTables; currTable++)
@@ -177,7 +119,7 @@ int main(int argc, char** argv)
                 for (size_t i = 0; i < nProcesses; i++)
                 {
                     childrenPids[pidUsed] = fork();
-                    if (0 == childrenPids[i])
+                    if (0 == childrenPids[pidUsed])
                     {
                         snprintf(cmd, sizeof(cmd) - 1,
                                  "%s < marked_%s.tbl_%zu > temp_%i_%i",
@@ -190,7 +132,6 @@ int main(int argc, char** argv)
                 }
             }
 
-            fprintf(stderr, "my pid %i\n", getpid());
             if (1)  /// можно сделать additional здесь
             {
                 int status = 0;
@@ -247,3 +188,61 @@ int main(int argc, char** argv)
 
     return 0;
 }
+
+void splitFile(char* input, size_t nClusters)
+{
+    strncat(input, ".tbl", sizeof(input) - 1);
+
+    FILE* inputFile = fopen(input, "r");
+    fseek(inputFile, 0, SEEK_END);
+    size_t fileLength = (size_t) ftell(inputFile);
+
+    char* fileAddr = (char*) mmap(0, fileLength, PROT_READ, MAP_SHARED,
+                                  fileno(inputFile), 0);
+
+    size_t labels[nClusters + 1];
+    memset(labels, 0, (nClusters + 1) * sizeof(labels[0]));
+
+    size_t currCluster = 0;
+    for (size_t k = 0, i = 0; k < nClusters - 1; k++)
+    {
+        for (size_t j = 0; i < fileLength && j < (fileLength / nClusters + 1); i++, j++)
+        {
+            if (fileAddr[i] == '\n')
+            {
+                labels[currCluster++] = i;
+                i += 2 + fileLength / nClusters - j; // есть ли тут ошибка на один? Да наверняка
+                break;
+            }
+        }
+    }
+
+    labels[currCluster++] = fileLength;
+//    nClusters = currCluster; тут (мб) надо делать меньше блоков, если нужно. сейчас делаются нулевые.
+
+    munmap(fileAddr, fileLength);
+    fclose(inputFile);
+
+    for (int i = 0, prevOffset = -1; i < nClusters; prevOffset = labels[i], i++)
+    {
+        char cmd[1000] = "";
+        snprintf(cmd, sizeof(cmd) - 1, "dd bs=1 if=%s skip=%i count=%zu of=marked_%s_%i",
+                 input, prevOffset + 1, labels[i] - prevOffset, input, i);
+        system(cmd);
+    }
+}
+
+int parseCommand(const char* command)
+{
+    int currentCommand = OTHER;
+    if (strcmp(command, "map") == 0)
+        currentCommand = MAP;
+    else if (strcmp(command, "reduce") == 0)
+        currentCommand = REDUCE;
+    else if (strcmp(command, "exit") == 0)
+        currentCommand = EXIT;
+    else if (strcmp(command, "mark") == 0)
+        currentCommand = MARK;
+    return currentCommand;
+}
+
