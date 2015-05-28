@@ -3,10 +3,12 @@
 #include <string.h>
 #include <assert.h>
 #include <time.h>
+#include <unistd.h>
 
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 
 #define WORDSIZE 256
 
@@ -49,7 +51,7 @@ void splitFile(char* input, size_t nClusters)
     }
 
     labels[currCluster++] = fileLength;
-    nClusters = currCluster;
+//    nClusters = currCluster; тут (мб) надо делать меньше блоков, если нужно. сейчас делаются нулевые.
 
     munmap(fileAddr, fileLength);
     fclose(inputFile);
@@ -79,7 +81,6 @@ int parseCommand(const char* command)
 
 int main(int argc, char** argv)
 {
-    srand((uint)time(0));
     system("ls");
     size_t nProcesses = 4;
 
@@ -161,44 +162,27 @@ int main(int argc, char** argv)
                 nTables = 1;
             }
 
-            for (size_t i = 0; i < nProcesses; i++)
+
+            assert(nTables == 1);
+            int outputTableIdx = 0;
+            for (int currTable = 0; currTable < nTables; currTable++)
             {
-                snprintf(cmd, sizeof(cmd) - 1, "%s > temp_%s_%lu.tbl", processor, command, i);
-                processorHandles[i] = popen(cmd, "w");
+                for (size_t i = 0; i < nProcesses; i++)
+                {
+                    childrenPids[i] = fork();
+                    if (0 == childrenPids[i])
+                    {
+                        snprintf(cmd, sizeof(cmd) - 1, "%s < marked_%s.tbl_%i > marked_%s.tbl_%i", processor, tables[currTable],
+                                 i, output, outputTableIdx);
+                        execlp("bash", "bash", "-c", cmd, (char*)(NULL));
+                    }
+                    outputTableIdx++;
+                }
             }
 
-            int currentTableIdx = 0, currentProcessor = 0;
-            FILE* currentInputTable = fopen(tables[currentTableIdx], "r");
-
-            char lastKey[WORDSIZE] = "Please work";
-            char key[WORDSIZE] = "";
-
-            do
-            {
-                if (!currentInputTable)
-                {
-                    fprintf(stderr, "File %s could not be opened, exiting\n", tables[currentTableIdx]);
-                    break;
-                }
-                while (!feof(currentInputTable))
-                {
-                    getline(&line, &lineLength, currentInputTable);
-                    fwrite(line, strlen(line), 1, processorHandles[currentProcessor]);
-
-                    if (currentCommand == MAP || (sscanf(line, "%s", key)
-                                                  && strcmp(lastKey, key)
-                                                  && strcpy(lastKey, key)))
-                        currentProcessor = (currentProcessor + 1) % (int)nProcesses;
-                }
-                fclose(currentInputTable);
-            }
-            while (currentTableIdx < nTables - 1 && (currentInputTable = fopen(tables[++currentTableIdx], "r")));
-
-            snprintf(cmd, sizeof(cmd) - 1, "cat temp_%s_{0..%lu}.tbl > %s", command, nProcesses - 1, output);
-            system(cmd);
-
-            for (size_t i = 0; i < nProcesses; i++)
-                pclose(processorHandles[i]);
+            int status = 0;
+            for (int i = 0; i < nProcesses; i++)
+                waitpid(childrenPids[i], &status, 0);
         }
         else if (EXIT == currentCommand)
         {
@@ -225,9 +209,6 @@ int main(int argc, char** argv)
             continue;
         }
     }
-
-    snprintf(cmd, sizeof(cmd) - 1, "rm -f temp_{map,reduce}_{0..%lu}.tbl", nProcesses - 1);
-    system(cmd);
 
     free(processorHandles);
     free(line);
