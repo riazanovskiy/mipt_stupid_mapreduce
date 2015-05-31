@@ -9,12 +9,9 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include "reduce.h"
 
 #define WORDSIZE 256
-
-char processor[WORDSIZE];
-
-char tables[100][WORDSIZE];
 
 enum CLICOMMAND
 {
@@ -26,6 +23,11 @@ int parseCommand(const char* command);
 
 int main(int argc, char** argv)
 {
+    char* tables[100];
+    for (int i = 0; i < 100; i++)
+        tables[i] = malloc(WORDSIZE);
+    char processor[WORDSIZE];
+
     system("ls");
     srand((unsigned int) time(0));
     size_t nProcesses = 4;
@@ -39,7 +41,6 @@ int main(int argc, char** argv)
 
     size_t nClusters = nProcesses;
 
-    FILE** processorHandles = (FILE**) malloc(sizeof(FILE*) * nProcesses);
     char *line = 0;
     size_t lineLength = 0;
 
@@ -88,28 +89,7 @@ int main(int argc, char** argv)
             strcpy(output, tables[nTables]);
 
             if (REDUCE == currentCommand)
-            {
-                assert(REDUCE != currentCommand);
-                for (int i = 0; i < nTables; ++i)
-                {
-                    snprintf(cmd, sizeof(cmd) - 1, "sort --parallel=%lu %s > reduce_%i.tbl",
-                             nProcesses, tables[i], i);
-                    system(cmd);
-                }
-
-                char tempName[256];
-                snprintf(cmd, sizeof(cmd) - 1, "sort --merge");
-                for (int i = 0; i < nTables; ++i)
-                {
-                    snprintf(tempName, sizeof(tempName) - 1, " reduce_%i.tbl", i);
-                    strncat(cmd, tempName, sizeof(cmd) - 1);
-                }
-                strncat(cmd, " > sorted.tbl", sizeof(cmd) - 1);
-                system(cmd);
-
-                strcpy(tables[0], "sorted.tbl");
-                nTables = 1;
-            }
+                sortTables(tables, nTables, nProcesses);
 
             int outputTableIdx = 0, operationId = rand();
             int fromPid = pidUsed;
@@ -183,7 +163,8 @@ int main(int argc, char** argv)
         }
     }
 
-    free(processorHandles);
+    for (int i = 0; i < 100; i++)
+        free(tables[i]);
     free(line);
 
     return 0;
@@ -245,4 +226,3 @@ int parseCommand(const char* command)
         currentCommand = MARK;
     return currentCommand;
 }
-
