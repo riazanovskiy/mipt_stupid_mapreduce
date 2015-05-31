@@ -6,7 +6,7 @@
 char* getTempFilename(int operationID, size_t process)
 {
     char* filename;
-    asprintf(&filename, "temp_%d_%zu", operationID, process);
+    asprintf(&filename, "temp_%i_%zu", operationID, process);
     return filename;
 }
 
@@ -134,26 +134,32 @@ char** getDelimiters(char* tableNames[], size_t nTables, size_t nProcesses)
     return delims;
 }
 
-void sortTables(char **tableNames, size_t nTables, size_t nProcesses)
+size_t runReducers(char **tableNames, size_t nTables, size_t nProcesses,
+                   pid_t* pidPool, size_t pidUsed, const char* processor,
+                   int operationId)
 {
     // generate file identifier not to collide with another temp file
-    int operationID = rand();
-
-    // get delimiters to partition tables to chunks
+    int sortId = rand();
     char** delimiters = getDelimiters(tableNames, nTables, nProcesses);
 
     // partition tables to (nDelims + 1) chunks
-    emitToChunks(tableNames, nTables, nProcesses, operationID, delimiters);
+    emitToChunks(tableNames, nTables, nProcesses, sortId, delimiters);
     free(delimiters);
 
-    // sort chunks
-    sortChunks(nProcesses, operationID);
+    sortChunks(nProcesses, sortId);
+
+    char cmd[1000] = "";
+
+    for (size_t i = 0; i < nProcesses * nTables; i++, pidUsed++)
+    {
+        pidPool[pidUsed] = fork();
+        if (!pidPool[pidUsed])
+        {
+            snprintf(cmd, sizeof(cmd) - 1,
+                     "%s < temp_%i_%zu > temp_%i_%zu",
+                     processor, sortId, i, operationId, i);
+            execlp("bash", "bash", "-c", cmd, (char*)(NULL));
+        }
+    }
+    return pidUsed;
 }
-
-/****************************** REDUCE ******************************/
-
-//void runReducers(char* tableNames[], size_t nTables, char* )
-//{
-//    sortTables(tables, nTables);
-//}
-

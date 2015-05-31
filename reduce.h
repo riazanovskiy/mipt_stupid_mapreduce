@@ -9,9 +9,6 @@
 #include <sys/wait.h>
 #include <pthread.h>
 
-char* getTempFilename(int operationID, size_t process);
-void emitToChunks(char* tableNames[], size_t nTables, size_t nProcesses, int operationID, char* delims[]);
-void sortChunks(size_t nChunks, int operationID);
-char** getDelimiters(char* tableNames[], size_t nTables, size_t nProcesses);
-void sortTables(char **tableNames, size_t nTables, size_t nProcesses);
-//void runReducers(char* tableNames[], size_t nTables, char* )
+size_t runReducers(char **tableNames, size_t nTables, size_t nProcesses,
+                   pid_t* pidPool, size_t pidUsed, const char* processor,
+                   int operationId);

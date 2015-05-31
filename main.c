@@ -9,6 +9,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+
 #include "reduce.h"
 
 #define WORDSIZE 256
@@ -20,6 +21,9 @@ enum CLICOMMAND
 
 void splitFile(char* input, size_t nClusters);
 int parseCommand(const char* command);
+size_t runMappers(char **tableNames, size_t nTables, size_t nProcesses,
+                  pid_t* pidPool, size_t pidUsed, const char* processor,
+                  int operationId);
 
 int main(int argc, char** argv)
 {
@@ -45,10 +49,9 @@ int main(int argc, char** argv)
     size_t lineLength = 0;
 
     char command[WORDSIZE] = "";
-    char cmd[1000] = "";
 
     pid_t childrenPids[1000] = {};
-    int pidUsed = 0;
+    size_t pidUsed = 0;
 
     while (printf("1-day-till-deadline> "), getline(&line, &lineLength, stdin) >= 0)
     {
@@ -72,7 +75,7 @@ int main(int argc, char** argv)
                 continue;
             }
 
-            int nTables = 0;
+            size_t nTables = 0;
             while ((nextToken = strtok(NULL, " \t\r\n")))
                 strcpy(tables[nTables++], nextToken);
 
@@ -88,53 +91,41 @@ int main(int argc, char** argv)
             char output[WORDSIZE];
             strcpy(output, tables[nTables]);
 
+            int operationId = rand();
+
+            size_t fromPid = pidUsed;
+
             if (REDUCE == currentCommand)
-                sortTables(tables, nTables, nProcesses);
-
-            int outputTableIdx = 0, operationId = rand();
-            int fromPid = pidUsed;
-
-            for (int currTable = 0; currTable < nTables; currTable++)
-            {
-                for (size_t i = 0; i < nProcesses; i++)
-                {
-                    childrenPids[pidUsed] = fork();
-                    if (0 == childrenPids[pidUsed])
-                    {
-                        snprintf(cmd, sizeof(cmd) - 1,
-                                 "%s < marked_%s.tbl_%zu > temp_%i_%i",
-                                 processor, tables[currTable], i, operationId, outputTableIdx);
-                        execlp("bash", "bash", "-c", cmd, (char*)(NULL));
-                        return 0;
-                    }
-                    outputTableIdx++;
-                    pidUsed++;
-                }
-            }
+                pidUsed = runReducers(tables, nTables, nProcesses, childrenPids, pidUsed,
+                                      processor, operationId);
+            else
+                pidUsed = runMappers(tables, nTables, nProcesses, childrenPids, pidUsed,
+                                     processor, operationId);
 
             if (1)  /// можно сделать additional здесь
             {
                 int status = 0;
-                for (int i = fromPid; i < fromPid + outputTableIdx; i++)
+                for (size_t i = fromPid; i < fromPid + nTables * nProcesses; i++)
                     waitpid(childrenPids[i], &status, 0);
-                if (fromPid + outputTableIdx == pidUsed)
+                if (fromPid + nTables * nProcesses == pidUsed)
                     pidUsed = fromPid;
             }
 
-            for (int i = 0; i < nProcesses; i++)
+            for (size_t i = 0; i < nProcesses; i++)
             {
                 char cmd[1000] = "cat ";
                 int from = strlen(cmd);
-                for (int j = 0; j < nTables; j++)
+                for (size_t j = 0; j < nTables; j++)
                 {
-                    from += snprintf(cmd + from, sizeof(cmd) - 1, "temp_%i_%i ", operationId, i + nProcesses*j);
+                    from += snprintf(cmd + from, sizeof(cmd) - 1, "temp_%i_%zu ", operationId, i + nProcesses*j);
                     assert(from < sizeof(cmd));
                 }
-                snprintf(cmd + from, sizeof(cmd) - 1, "> marked_%s.tbl_%i", output, i);
+                snprintf(cmd + from, sizeof(cmd) - 1, "> marked_%s.tbl_%zu", output, i);
                 system(cmd);
             }
 
-            snprintf(cmd, sizeof(cmd) - 1, "bash -c \"rm temp_%i_{0..%i}\"", operationId, outputTableIdx - 1);
+            char cmd[1000] = "";
+            snprintf(cmd, sizeof(cmd) - 1, "bash -c \"rm temp_%i_{0..%zu}\"", operationId, nProcesses * nTables - 1);
             system(cmd);
         }
         else if (EXIT == currentCommand)
@@ -225,4 +216,27 @@ int parseCommand(const char* command)
     else if (strcmp(command, "mark") == 0)
         currentCommand = MARK;
     return currentCommand;
+}
+
+size_t runMappers(char **tableNames, size_t nTables, size_t nProcesses,
+                  pid_t* pidPool, size_t pidUsed, const char* processor,
+                  int operationId)
+{
+    char cmd[1000];
+    for (size_t currTable = 0, outputTableIdx = 0; currTable < nTables; currTable++)
+    {
+        for (size_t i = 0; i < nProcesses; i++, outputTableIdx++, pidUsed++)
+        {
+            pidPool[pidUsed] = fork();
+            if (0 == pidPool[pidUsed])
+            {
+                snprintf(cmd, sizeof(cmd) - 1,
+                         "%s < marked_%s.tbl_%zu > temp_%i_%zu",
+                         processor, tableNames[currTable], i, operationId, outputTableIdx);
+                execlp("bash", "bash", "-c", cmd, (char*)(NULL));
+                return 0;
+            }
+        }
+    }
+    return pidUsed;
 }
