@@ -1,6 +1,5 @@
 #include "reduce.h"
 
-
 /************************** SORT *******************************/
 
 char* getTempFilename(int operationID, size_t process)
@@ -24,6 +23,7 @@ typedef struct
     char** delims;
     size_t nChunks;
     pthread_mutex_t* chunkMutexes;
+    FILE** outputFiles;
     int operationID;
 } PartitionArgs;
 
@@ -40,17 +40,9 @@ void* partitionFileWithDelims(PartitionArgs* args)
         while (chunkID + 1 < args->nChunks && strcmp(line, args->delims[chunkID]) >= 0)
             ++chunkID;
 
-        // START LOCK
         pthread_mutex_lock(&args->chunkMutexes[chunkID]);
-
-        char* chunkFilename = getTempFilename(args->operationID, chunkID);
-        FILE* chunkFile = fopen(chunkFilename, "a+");
-        fprintf(chunkFile, "%s", line);
-        fclose(chunkFile);
-        free(chunkFilename);
-
+        fprintf(args->outputFiles[chunkID], "%s", line);
         pthread_mutex_unlock(&args->chunkMutexes[chunkID]);
-        // END LOCK
     }
 
     free(line);
@@ -58,13 +50,22 @@ void* partitionFileWithDelims(PartitionArgs* args)
     return 0;
 }
 
-void emitToChunks(char** tableNames, size_t nTables, size_t nProcesses,  int operationID, char* delims[])
+void emitToChunks(char** tableNames, size_t nTables, size_t nProcesses,  int operationID,
+                  char* delims[])
 {
     size_t nChunks = nTables * nProcesses;
     // prepare mutexes and threads for each chunk
     pthread_t* chunkThreads = malloc(sizeof(pthread_t) * nChunks);
     pthread_mutex_t* chunkMutexes = malloc(sizeof(pthread_mutex_t) * nChunks);
     PartitionArgs* args = malloc(sizeof(PartitionArgs) * nChunks);
+    FILE** outputFiles = malloc(sizeof(FILE*) * nChunks);
+
+    char filename[1000] = "";
+    for (size_t i = 0; i < nChunks; i++)
+    {
+        snprintf(filename, sizeof(filename) - 1, "temp_%i_%zu", operationID, i);
+        outputFiles[i] = fopen(filename, "a+");
+    }
 
     for (size_t idx = 0; idx < nChunks; ++idx)
         pthread_mutex_init(&chunkMutexes[idx], 0);
@@ -78,6 +79,7 @@ void emitToChunks(char** tableNames, size_t nTables, size_t nProcesses,  int ope
             asprintf(&args[idx].inputFileName, "marked_%s.tbl_%zu", tableNames[table], part);
             args[idx].operationID = operationID;
             args[idx].nChunks = nChunks;
+            args[idx].outputFiles = outputFiles;
 
             pthread_create(chunkThreads + idx, NULL, partitionFileWithDelims, args + idx);
         }
@@ -87,8 +89,12 @@ void emitToChunks(char** tableNames, size_t nTables, size_t nProcesses,  int ope
         pthread_join(chunkThreads[idx], NULL);
 
     for (size_t i = 0; i < nChunks; i++)
+    {
         free(args[i].inputFileName);
+        fclose(outputFiles[i]);
+    }
 
+    free(outputFiles);
     free(args);
     free(chunkMutexes);
     free(chunkThreads);
@@ -144,6 +150,9 @@ size_t runReducers(char **tableNames, size_t nTables, size_t nProcesses,
 
     // partition tables to (nDelims + 1) chunks
     emitToChunks(tableNames, nTables, nProcesses, sortId, delimiters);
+
+    for (size_t i = 0; i < nTables * nProcesses; i++)
+        free(delimiters[i]);
     free(delimiters);
 
     sortChunks(nProcesses, sortId);
