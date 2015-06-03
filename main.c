@@ -12,25 +12,25 @@
 
 #include "reduce.h"
 
-#define WORDSIZE 256
-
 enum CLICOMMAND
 {
-    MAP, REDUCE, EXIT, MARK, OTHER
+    MAP, REDUCE, EXIT, MARK, WRITE, WAIT, OTHER
 };
 
 void splitFile(char* input, size_t nClusters);
 int parseCommand(const char* command);
-size_t runMappers(char **tableNames, size_t nTables, size_t nProcesses,
-                  pid_t* pidPool, size_t pidUsed, const char* processor,
-                  int operationId);
+size_t runMappers(char **tableNames, size_t nTables, size_t nProcesses, pid_t* pidPool,
+                  size_t pidUsed, const char* processor, int operationId);
+size_t collectChildren(size_t nProcesses, size_t pidUsed, pid_t *childrenPids, size_t nTables,
+                       int operationId, char *output, size_t fromPid);
 
 int main(int argc, char** argv)
 {
+    const int WORDSIZE = 256;
     char* tables[100];
     for (int i = 0; i < 100; i++)
         tables[i] = malloc(WORDSIZE);
-    char processor[WORDSIZE];
+    char* processor = calloc(WORDSIZE, 1);
 
     system("ls");
     srand((unsigned int) time(0));
@@ -85,7 +85,12 @@ int main(int argc, char** argv)
                 continue;
             }
 
-//            if (0 == strcmp(tables[nTables - 1], "&"))  тут можно сделать additional
+            int asynchronous = 0;
+            if (0 == strcmp(tables[nTables - 1], "&"))
+            {
+                asynchronous = 1;
+                nTables--;
+            }
 
             --nTables;
             char output[WORDSIZE];
@@ -101,32 +106,9 @@ int main(int argc, char** argv)
             else
                 pidUsed = runMappers(tables, nTables, nProcesses, childrenPids, pidUsed,
                                      processor, operationId);
-
-            if (1)  /// можно сделать additional здесь
-            {
-                int status = 0;
-                for (size_t i = fromPid; i < fromPid + nTables * nProcesses; i++)
-                    waitpid(childrenPids[i], &status, 0);
-                if (fromPid + nTables * nProcesses == pidUsed)
-                    pidUsed = fromPid;
-            }
-
-            for (size_t i = 0; i < nProcesses; i++)
-            {
-                char cmd[1000] = "cat ";
-                int from = (int) strlen(cmd);
-                for (size_t j = 0; j < nTables; j++)
-                {
-                    from += snprintf(cmd + from, sizeof(cmd) - 1, "temp_%i_%zu ", operationId, i + nProcesses*j);
-                    assert((size_t)from < sizeof(cmd));
-                }
-                snprintf(cmd + from, sizeof(cmd) - 1, "> marked_%s.tbl_%zu", output, i);
-                system(cmd);
-            }
-
-            char cmd[1000] = "";
-            snprintf(cmd, sizeof(cmd) - 1, "bash -c \"rm temp_%i_{0..%zu}\"", operationId, nProcesses * nTables - 1);
-            system(cmd);
+            if (!asynchronous)
+                pidUsed = collectChildren(nProcesses, pidUsed, childrenPids, nTables,
+                                          operationId, output, fromPid);
         }
         else if (EXIT == currentCommand)
         {
@@ -154,6 +136,7 @@ int main(int argc, char** argv)
         }
     }
 
+    free(processor);
     for (int i = 0; i < 100; i++)
         free(tables[i]);
     free(line);
@@ -222,6 +205,12 @@ int parseCommand(const char* command)
         currentCommand = EXIT;
     else if (strcmp(command, "mark") == 0)
         currentCommand = MARK;
+/*
+    else if (strcmp(command, "wait") == 0)
+        currentCommand = WAIT;
+    else if (strcmp(command, "write") == 0)
+        currentCommand = WRITE;
+*/
     return currentCommand;
 }
 
@@ -245,5 +234,43 @@ size_t runMappers(char **tableNames, size_t nTables, size_t nProcesses,
             }
         }
     }
+    return pidUsed;
+}
+
+size_t collectChildren(size_t nProcesses, size_t pidUsed, pid_t* childrenPids, size_t nTables, int operationId, char* output, size_t fromPid)
+{
+
+    int status = 0;
+    for (size_t i = fromPid; i < fromPid + nTables * nProcesses; i++)
+    {
+        waitpid(childrenPids[i], &status, 0);
+        childrenPids[i] = 0;
+    }
+
+    if (fromPid + nTables * nProcesses == pidUsed)
+    {
+        pidUsed = fromPid;
+        while (pidUsed > 0 && !childrenPids[pidUsed])
+            pidUsed--;
+    }
+
+
+    for (size_t i = 0; i < nProcesses; i++)
+    {
+        char cmd[1000] = "cat ";
+        int from = (int) strlen(cmd);
+        for (size_t j = 0; j < nTables; j++)
+        {
+            from += snprintf(cmd + from, sizeof(cmd) - 1, "temp_%i_%zu ", operationId, i + nProcesses*j);
+            assert((size_t)from < sizeof(cmd));
+        }
+        snprintf(cmd + from, sizeof(cmd) - 1, "> marked_%s.tbl_%zu", output, i);
+        system(cmd);
+    }
+
+    char cmd[1000] = "";
+    snprintf(cmd, sizeof(cmd) - 1, "bash -c \"rm temp_%i_{0..%zu}\"", operationId, nProcesses * nTables - 1);
+    system(cmd);
+
     return pidUsed;
 }

@@ -66,9 +66,9 @@ void emitToChunks(char** tableNames, size_t nTables, size_t nProcesses,  int ope
 {
     size_t nChunks = nTables * nProcesses;
     // prepare mutexes and threads for each chunk
-    pthread_t* chunkThreads = malloc(sizeof(pthread_t) * nChunks);
+    pthread_t* chunkThreads = calloc(sizeof(pthread_t) * nChunks, 1);
     pthread_mutex_t* chunkMutexes = malloc(sizeof(pthread_mutex_t) * nChunks);
-    PartitionArgs* args = malloc(sizeof(PartitionArgs) * nChunks);
+    PartitionArgs* args = calloc(sizeof(PartitionArgs) * nChunks, 1);
     FILE** outputFiles = malloc(sizeof(FILE*) * nChunks);
 
     char filename[1000] = "";
