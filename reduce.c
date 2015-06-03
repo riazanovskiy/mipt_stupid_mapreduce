@@ -92,7 +92,8 @@ void emitToChunks(char** tableNames, size_t nTables, size_t nProcesses,  int ope
             args[idx].nChunks = nChunks;
             args[idx].outputFiles = outputFiles;
 
-            pthread_create(chunkThreads + idx, NULL, partitionFileWithDelims, args + idx);
+            pthread_create(chunkThreads + idx, NULL, (void*(*)(void*))partitionFileWithDelims,
+                           args + idx);
         }
     }
 
@@ -146,7 +147,7 @@ char** getDelimiters(char* tableNames[], size_t nTables, size_t nProcesses)
         }
     }
 
-    qsort(delims, nDelims, sizeof(char*), strcmp);
+    qsort(delims, nDelims, sizeof(char*), (__compar_fn_t)strcmp);
 
     return delims;
 }

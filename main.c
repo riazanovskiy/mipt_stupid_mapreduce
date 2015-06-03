@@ -114,11 +114,11 @@ int main(int argc, char** argv)
             for (size_t i = 0; i < nProcesses; i++)
             {
                 char cmd[1000] = "cat ";
-                int from = strlen(cmd);
+                int from = (int) strlen(cmd);
                 for (size_t j = 0; j < nTables; j++)
                 {
                     from += snprintf(cmd + from, sizeof(cmd) - 1, "temp_%i_%zu ", operationId, i + nProcesses*j);
-                    assert(from < sizeof(cmd));
+                    assert((size_t)from < sizeof(cmd));
                 }
                 snprintf(cmd + from, sizeof(cmd) - 1, "> marked_%s.tbl_%zu", output, i);
                 system(cmd);
@@ -163,9 +163,14 @@ int main(int argc, char** argv)
 
 void splitFile(char* input, size_t nClusters)
 {
-    strncat(input, ".tbl", sizeof(input) - 1);
+    strcat(input, ".tbl");
 
     FILE* inputFile = fopen(input, "r");
+    if (!input)
+    {
+        fprintf(stderr, "Can not open file %s\n", input);
+        return;
+    }
     fseek(inputFile, 0, SEEK_END);
     size_t fileLength = (size_t) ftell(inputFile);
 
@@ -195,11 +200,13 @@ void splitFile(char* input, size_t nClusters)
     munmap(fileAddr, fileLength);
     fclose(inputFile);
 
-    for (int i = 0, prevOffset = -1; i < nClusters; prevOffset = labels[i], i++)
+    for (ssize_t i = 0, prevOffset = -1;
+         i < (ssize_t) nClusters;
+         prevOffset = (int64_t) labels[i], i++)
     {
         char cmd[1000] = "";
-        snprintf(cmd, sizeof(cmd) - 1, "dd bs=1 if=%s skip=%i count=%zu of=marked_%s_%i",
-                 input, prevOffset + 1, labels[i] - prevOffset, input, i);
+        snprintf(cmd, sizeof(cmd) - 1, "dd bs=1 if=%s skip=%zi count=%zu of=marked_%s_%zi",
+                 input, prevOffset + 1, (ssize_t) labels[i] - prevOffset, input, i);
         system(cmd);
     }
 }
