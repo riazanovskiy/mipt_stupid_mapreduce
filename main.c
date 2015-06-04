@@ -213,7 +213,7 @@ void splitFile(char* input, size_t nClusters)
     memset(labels, 0, (nClusters + 1) * sizeof(labels[0]));
 
     size_t currCluster = 0;
-    for (size_t k = 0, i = 0; k < nClusters - 1; k++)
+    for (size_t k = 0, i = (fileLength / nClusters) * 0.9; k < nClusters - 1; k++)
     {
         for (size_t j = 0; i < fileLength && j < (fileLength / nClusters + 1); i++, j++)
         {
