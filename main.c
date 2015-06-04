@@ -24,6 +24,15 @@ size_t runMappers(char **tableNames, size_t nTables, size_t nProcesses, pid_t* p
 size_t collectChildren(size_t nProcesses, size_t pidUsed, pid_t *childrenPids, size_t nTables,
                        int operationId, char *output, size_t fromPid);
 
+typedef struct
+{
+    size_t nTables, fromPid;
+    char* outputTable;
+    int operationId;
+} DelayedOperation;
+
+DelayedOperation* delayedOperations;
+
 int main(int argc, char** argv)
 {
     const int WORDSIZE = 256;
@@ -31,6 +40,10 @@ int main(int argc, char** argv)
     for (int i = 0; i < 100; i++)
         tables[i] = malloc(WORDSIZE);
     char* processor = calloc(WORDSIZE, 1);
+
+    int delayedQueueSize = 100;
+    delayedOperations = calloc(sizeof(DelayedOperation) * delayedQueueSize, 1);
+    size_t nDelayedOperation = 0;
 
     system("ls");
     srand((unsigned int) time(0));
@@ -44,6 +57,8 @@ int main(int argc, char** argv)
     }
 
     size_t nClusters = nProcesses;
+
+    fprintf(stderr, "\nnProcesses: %zu \n", nProcesses);
 
     char *line = 0;
     size_t lineLength = 0;
@@ -107,8 +122,28 @@ int main(int argc, char** argv)
                 pidUsed = runMappers(tables, nTables, nProcesses, childrenPids, pidUsed,
                                      processor, operationId);
             if (!asynchronous)
+            {
                 pidUsed = collectChildren(nProcesses, pidUsed, childrenPids, nTables,
                                           operationId, output, fromPid);
+            }
+            else
+            {
+                if (nDelayedOperation + 1 < delayedQueueSize)
+                {
+                    printf("Operation %zu in background\n", nDelayedOperation);
+                    delayedOperations[nDelayedOperation].fromPid = fromPid;
+                    delayedOperations[nDelayedOperation].nTables = nTables;
+                    delayedOperations[nDelayedOperation].operationId = operationId;
+                    delayedOperations[nDelayedOperation].outputTable = strdup(output);
+                    nDelayedOperation++;
+                }
+                else
+                {
+                    fprintf(stderr, "Can not run in background\n");
+                    pidUsed = collectChildren(nProcesses, pidUsed, childrenPids, nTables,
+                                              operationId, output, fromPid);
+                }
+            }
         }
         else if (EXIT == currentCommand)
         {
@@ -129,6 +164,19 @@ int main(int argc, char** argv)
 
             splitFile(input, nClusters);
         }
+        else if (WAIT == currentCommand)
+        {
+            while (nDelayedOperation)
+            {
+                nDelayedOperation--;
+                pidUsed = collectChildren(nProcesses, pidUsed, childrenPids,
+                                          delayedOperations[nDelayedOperation].nTables,
+                                          delayedOperations[nDelayedOperation].operationId,
+                                          delayedOperations[nDelayedOperation].outputTable,
+                                          delayedOperations[nDelayedOperation].fromPid);
+                free(delayedOperations[nDelayedOperation].outputTable);
+            }
+        }
         else
         {
             printf("Only \"map\" and \"reduce\" commands available\n");
@@ -136,6 +184,7 @@ int main(int argc, char** argv)
         }
     }
 
+    free(delayedOperations);
     free(processor);
     for (int i = 0; i < 100; i++)
         free(tables[i]);
@@ -205,12 +254,11 @@ int parseCommand(const char* command)
         currentCommand = EXIT;
     else if (strcmp(command, "mark") == 0)
         currentCommand = MARK;
-/*
     else if (strcmp(command, "wait") == 0)
         currentCommand = WAIT;
     else if (strcmp(command, "write") == 0)
         currentCommand = WRITE;
-*/
+
     return currentCommand;
 }
 
@@ -237,7 +285,8 @@ size_t runMappers(char **tableNames, size_t nTables, size_t nProcesses,
     return pidUsed;
 }
 
-size_t collectChildren(size_t nProcesses, size_t pidUsed, pid_t* childrenPids, size_t nTables, int operationId, char* output, size_t fromPid)
+size_t collectChildren(size_t nProcesses, size_t pidUsed, pid_t* childrenPids, size_t nTables, int operationId,
+                       char* output, size_t fromPid)
 {
 
     int status = 0;

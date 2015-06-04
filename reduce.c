@@ -143,7 +143,7 @@ char** getDelimiters(char* tableNames[], size_t nTables, size_t nProcesses)
         {
             snprintf(filename, sizeof(filename) - 1, "marked_%s.tbl_%zu",
                      tableNames[table], i);
-            readFirstString(filename, delims + i + table*nTables);
+            readFirstString(filename, delims + i + table*nProcesses);
         }
     }
 
